@@ -6,28 +6,27 @@ using Confluent.Kafka;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MongoConsumer.Config;
-using MongoConsumer.Pipeline;
-using MongoConsumer.Pipeline.Data;
+using MongoConsumer.Services;
 using ParameterDataLib;
 
 namespace MongoConsumer.Build
 {
-    public class RuntimeService : BackgroundService
+    internal class KafkaConsumerService : BackgroundService
     {
         private static readonly TimeSpan _retryDelay = TimeSpan.FromSeconds(2);
 
-        private readonly TelemetryPipeline _pipeline;
+        private readonly BatchHandler _batchHandler;
         private readonly KafkaConsumerConfig _config;
         private readonly IHostApplicationLifetime _lifetime;
 
-        public RuntimeService
+        public KafkaConsumerService
         (
-            TelemetryPipeline pipeline,
+            BatchHandler batchHandler,
             IOptions<KafkaConsumerConfig> options,
             IHostApplicationLifetime lifetime
         )
         {
-            _pipeline = pipeline;
+            _batchHandler = batchHandler;
             _config = options.Value;
             _lifetime = lifetime;
         }
@@ -37,7 +36,7 @@ namespace MongoConsumer.Build
             return Task.Run(() => RunAsync(stoppingToken), stoppingToken);
         }
 
-        private async Task RunAsync(CancellationToken token)
+        private async Task RunAsync(CancellationToken ct)
         {
             ConsumerConfig consumerConfig = new()
             {
@@ -53,19 +52,19 @@ namespace MongoConsumer.Build
             {
                 consumer.Subscribe(_config.TopicName);
 
-                while (!token.IsCancellationRequested)
+                while (!ct.IsCancellationRequested)
                 {
                     ConsumeResult<string, string>? result;
 
                     try
                     {
-                        result = consumer.Consume(token);
+                        result = consumer.Consume(ct);
                     }
                     catch (ConsumeException ex) when (!ex.Error.IsFatal)
                     {
                         Console.WriteLine($"Kafka consume error: {ex.Error.Reason}");
                         Console.WriteLine(ex);
-                        await Task.Delay(_retryDelay, token);
+                        await Task.Delay(_retryDelay, ct);
                         continue;
                     }
 
@@ -95,11 +94,11 @@ namespace MongoConsumer.Build
                         continue;
                     }
 
-                    await _pipeline.ProcessAsync(batch, token);
+                    await _batchHandler.ProcessAsync(batch, ct);
                     consumer.StoreOffset(result);
                 }
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 // Normal shutdown.
             }
@@ -112,40 +111,8 @@ namespace MongoConsumer.Build
             }
             finally
             {
-                try
-                {
-                    await ShutdownPipelineAsync();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Pipeline failed while draining.");
-                    Console.WriteLine(ex);
-                    Environment.ExitCode = 1;
-                }
-                finally
-                {
-                    consumer.Close();
-                }
+                consumer.Close();
             }
-        }
-
-        private async Task ShutdownPipelineAsync()
-        {
-            if (_pipeline.HasFaulted)
-                return;
-
-            await _pipeline.CompleteInputAsync();
-
-            // A block may have faulted while draining; the flight then stays open for the next InitAsync.
-            if (_pipeline.HasFaulted)
-                return;
-
-            foreach (PersistBatch batch in _pipeline.Flush())
-                await _pipeline.WriteAsync(batch);
-
-            await _pipeline.CompleteWritesAsync();
-
-            await _pipeline.CloseCurrentFlightAsync();
         }
     }
 }

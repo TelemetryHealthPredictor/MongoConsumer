@@ -1,13 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using BaselineBuilder.ICDHandling;
+﻿using BaselineBuilder.ICDHandling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MongoConsumer.Config;
 using MongoConsumer.DbCreation;
-using MongoConsumer.Pipeline;
-using MongoConsumer.Pipeline.Stages;
+using MongoConsumer.Services;
 using MongoLib;
 using ThpUtils.Naming;
 
@@ -28,14 +24,10 @@ namespace MongoConsumer.Build
 
             builder.Services.AddSingleton<FieldCatalogSeedProvider>();
 
-            builder.Services.AddSingleton<FlightAssignmentStage>();
-            builder.Services.AddSingleton<CollectStage>();
-            builder.Services.AddSingleton<WriteStage>();
-
-            builder.Services.AddSingleton<TelemetryPipeline>();
+            builder.Services.AddSingleton<BatchHandler>();
 
             builder.Services.AddHostedService<InitHostedService>();
-            builder.Services.AddHostedService<RuntimeService>();
+            builder.Services.AddHostedService<KafkaConsumerService>();
         }
     }
 }
