@@ -111,6 +111,8 @@ namespace MongoConsumer.Build
             }
             finally
             {
+                await _batchHandler.FlushAsync(ct);
+
                 consumer.Close();
             }
         }
