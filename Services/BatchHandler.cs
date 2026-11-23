@@ -79,8 +79,8 @@ namespace MongoConsumer.Services
                 return;
             }
 
-            _pendingPackets.Clear();
             await _writer.WritePacketsAsync(_currentFlightId, _pendingPackets, ct);
+            _pendingPackets.Clear();
         }
     }
 }
